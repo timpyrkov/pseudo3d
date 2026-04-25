@@ -1,5 +1,5 @@
 // =====================================================================
-//  Pseudo-3D Bevel Polygon — self-contained p5.js sketch.
+//  Pseudo-3D Bevel Polygon - self-contained p5.js sketch.
 //  Works in the local index.html (uses #canvas-container / #controls /
 //  HTML sliders if present) AND in the p5js online editor (auto-creates
 //  its own sliders).
@@ -19,114 +19,112 @@ let ctl = {};
 // Reference to a "set play-button label" callback (HTML or p5 mode).
 let setPlayBtnLabel = () => {};
 
-new p5(function (p) {
-  p.setup = function () {
-    const cnv = p.createCanvas(W, H);
-    const cContainer = document.getElementById('canvas-container');
-    if (cContainer) cnv.parent(cContainer);
+function setup() {
+  const cnv = createCanvas(W, H);
+  const cContainer = document.getElementById('canvas-container');
+  if (cContainer) cnv.parent(cContainer);
 
-    buildControls(p);
-  };
+  buildControls();
+}
 
-  p.draw = function () {
-    // Pull current control values (all are per-frame locals)
-    const seed           = ctl.seed.value();
-    const numVertices    = ctl.vertices.value();
-    const noiseStrength  = ctl.noise.value();
-    const bevelThickness = ctl.bevel.value();
-    const lightAngle     = ctl.light.value();
-    const animSpeed      = Math.pow(10, ctl.speed.value() * 2 - 1);
+function draw() {
+  // Pull current control values (all are per-frame locals)
+  const seed           = ctl.seed.value();
+  const numVertices    = ctl.vertices.value();
+  const noiseStrength  = ctl.noise.value();
+  const bevelThickness = ctl.bevel.value();
+  const lightAngle     = ctl.light.value();
+  const animSpeed      = Math.pow(10, ctl.speed.value() * 2 - 1);
 
-    if (playing) animOffset += 0.005 * animSpeed;
+  if (playing) animOffset += 0.005 * animSpeed;
 
-    p.background(18, 18, 22);
+  background(18, 18, 22);
 
-    // --- Geometry ---
-    const outer = buildShape(p, seed, numVertices, noiseStrength, animOffset);
-    const n = outer.length;
-    const { inner, outerMap } = computeBevel(outer, bevelThickness);
-    const m = inner.length;
+  // --- Geometry ---
+  const outer = buildShape(seed, numVertices, noiseStrength, animOffset);
+  const n = outer.length;
+  const { inner, outerMap } = computeBevel(outer, bevelThickness);
+  const m = inner.length;
 
-    // Polygon centroid (for face-normal estimation)
-    let cx = 0, cy = 0;
-    for (const v of outer) { cx += v.x; cy += v.y; }
-    cx /= n; cy /= n;
+  // Polygon centroid (for face-normal estimation)
+  let cx = 0, cy = 0;
+  for (const v of outer) { cx += v.x; cy += v.y; }
+  cx /= n; cy /= n;
 
-    // Light direction unit vector
-    const la = lightAngle * Math.PI / 180;
-    const lx = Math.cos(la), ly = Math.sin(la);
+  // Light direction unit vector
+  const la = lightAngle * Math.PI / 180;
+  const lx = Math.cos(la), ly = Math.sin(la);
 
-    // --- Bevel side faces (shaded by outward direction · light) ---
-    p.noStroke();
-    for (let k = 0; k < m; k++) {
-      const k2 = (k + 1) % m;
-      const oA = outer[outerMap[k]];
-      const oB = outer[outerMap[k2]];
-      const iA = inner[k];
-      const iB = inner[k2];
+  // --- Bevel side faces (shaded by outward direction . light) ---
+  noStroke();
+  for (let k = 0; k < m; k++) {
+    const k2 = (k + 1) % m;
+    const oA = outer[outerMap[k]];
+    const oB = outer[outerMap[k2]];
+    const iA = inner[k];
+    const iB = inner[k2];
 
-      // Face centroid
-      const fcx = (oA.x + oB.x + iA.x + iB.x) * 0.25;
-      const fcy = (oA.y + oB.y + iA.y + iB.y) * 0.25;
-      // Outward (face-normal) direction in 2D = (face-centroid − polygon-centroid)
-      let nx = fcx - cx, ny = fcy - cy;
-      const L = Math.sqrt(nx * nx + ny * ny);
-      if (L > 1e-6) { nx /= L; ny /= L; }
+    // Face centroid
+    const fcx = (oA.x + oB.x + iA.x + iB.x) * 0.25;
+    const fcy = (oA.y + oB.y + iA.y + iB.y) * 0.25;
+    // Outward (face-normal) direction in 2D = (face-centroid - polygon-centroid)
+    let nx = fcx - cx, ny = fcy - cy;
+    const L = Math.sqrt(nx * nx + ny * ny);
+    if (L > 1e-6) { nx /= L; ny /= L; }
 
-      // Lambert-style brightness in [0,1]
-      const brightness = 0.5 + 0.5 * (nx * lx + ny * ly);
-      const g = 60 + 170 * brightness; // gray ramp [60, 230]
-      p.fill(g, g, g);
-      p.stroke(g, g, g);   // overdraw gaps between adjacent quads
-      p.strokeWeight(1.2);
+    // Lambert-style brightness in [0,1]
+    const brightness = 0.5 + 0.5 * (nx * lx + ny * ly);
+    const g = 60 + 170 * brightness; // gray ramp [60, 230]
+    fill(g, g, g);
+    stroke(g, g, g);   // overdraw gaps between adjacent quads
+    strokeWeight(1.2);
 
-      p.beginShape();
-      p.vertex(oA.x, oA.y);
-      p.vertex(oB.x, oB.y);
-      p.vertex(iB.x, iB.y);
-      p.vertex(iA.x, iA.y);
-      p.endShape(p.CLOSE);
+    beginShape();
+    vertex(oA.x, oA.y);
+    vertex(oB.x, oB.y);
+    vertex(iB.x, iB.y);
+    vertex(iA.x, iA.y);
+    endShape(CLOSE);
+  }
+
+  noStroke(); // clear stroke before top surface
+  // --- Top (flat) surface - medium uniform gray ---
+  fill(145);
+  beginShape();
+  for (const v of inner) vertex(v.x, v.y);
+  endShape(CLOSE);
+
+  // --- Wireframe overlay (subtle) ---
+  if (showWireframe) {
+    stroke(255, 255, 255, 90);
+    strokeWeight(1);
+    noFill();
+
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      line(outer[i].x, outer[i].y, outer[j].x, outer[j].y);
     }
-
-    p.noStroke(); // clear stroke before top surface
-    // --- Top (flat) surface — medium uniform gray ---
-    p.fill(145);
-    p.beginShape();
-    for (const v of inner) p.vertex(v.x, v.y);
-    p.endShape(p.CLOSE);
-
-    // --- Wireframe overlay (subtle) ---
-    if (showWireframe) {
-      p.stroke(255, 255, 255, 90);
-      p.strokeWeight(1);
-      p.noFill();
-
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n;
-        p.line(outer[i].x, outer[i].y, outer[j].x, outer[j].y);
-      }
-      for (let i = 0; i < m; i++) {
-        const j = (i + 1) % m;
-        const dx = inner[j].x - inner[i].x;
-        const dy = inner[j].y - inner[i].y;
-        if (dx * dx + dy * dy > 0.25) {
-          p.line(inner[i].x, inner[i].y, inner[j].x, inner[j].y);
-        }
-      }
-      for (let i = 0; i < m; i++) {
-        const oi = outerMap[i];
-        p.line(outer[oi].x, outer[oi].y, inner[i].x, inner[i].y);
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const dx = inner[j].x - inner[i].x;
+      const dy = inner[j].y - inner[i].y;
+      if (dx * dx + dy * dy > 0.25) {
+        line(inner[i].x, inner[i].y, inner[j].x, inner[j].y);
       }
     }
-  };
-});
+    for (let i = 0; i < m; i++) {
+      const oi = outerMap[i];
+      line(outer[oi].x, outer[oi].y, inner[i].x, inner[i].y);
+    }
+  }
+}
 
 // --------------- UI builder ---------------
 
 // If the host page already has the styled HTML sliders, wrap them.
 // Otherwise create p5 createSlider() controls so the script also
 // runs as-is in the p5js online editor.
-function buildControls(p) {
+function buildControls() {
   const hasHTML = !!document.getElementById('slider-seed');
 
   function wrapDOM(sliderId, valId, fmt) {
@@ -140,7 +138,7 @@ function buildControls(p) {
 
   function p5Slider(label, min, max, val, step, fmt) {
     const host = document.getElementById('controls');
-    const row = p.createDiv('');
+    const row = createDiv('');
     if (host) row.parent(host); else row.style('margin', '4px');
     row.style('display', 'flex');
     row.style('align-items', 'center');
@@ -149,16 +147,16 @@ function buildControls(p) {
     row.style('font-family', 'sans-serif');
     row.style('font-size', '13px');
 
-    const lab = p.createSpan(label);
+    const lab = createSpan(label);
     lab.parent(row);
     lab.style('min-width', '64px');
 
-    const valSpan = p.createSpan('');
+    const valSpan = createSpan('');
     valSpan.parent(row);
     valSpan.style('min-width', '40px');
     valSpan.style('color', '#fff');
 
-    const s = p.createSlider(min, max, val, step);
+    const s = createSlider(min, max, val, step);
     s.parent(row);
     s.style('flex', '1');
 
@@ -193,7 +191,7 @@ function buildControls(p) {
     ctl.speed    = p5Slider('Speed',    0,   1,   0.5, 0.01, v => Math.pow(10, v * 2 - 1).toFixed(2));
     // wireframe checkbox in p5 fallback
     const host = document.getElementById('controls');
-    const wireRow = p.createDiv('');
+    const wireRow = createDiv('');
     if (host) wireRow.parent(host); else wireRow.style('margin', '4px');
     wireRow.style('display', 'flex');
     wireRow.style('align-items', 'center');
@@ -201,13 +199,13 @@ function buildControls(p) {
     wireRow.style('color', '#cfd6dc');
     wireRow.style('font-family', 'sans-serif');
     wireRow.style('font-size', '13px');
-    const wireLabel = p.createSpan('Wireframe');
+    const wireLabel = createSpan('Wireframe');
     wireLabel.parent(wireRow);
     wireLabel.style('min-width', '64px');
-    const wireChk = p.createCheckbox('', true);
+    const wireChk = createCheckbox('', true);
     wireChk.parent(wireRow);
     wireChk.changed(() => { showWireframe = wireChk.checked(); });
-    const btn = p.createButton('⏸ Pause');
+    const btn = createButton('⏸ Pause');
     if (host) btn.parent(host); else btn.style('margin', '8px');
     setPlayBtnLabel = () => { btn.html(playing ? '⏸ Pause' : '▶ Play'); };
     btn.mousePressed(() => { playing = !playing; setPlayBtnLabel(); });
@@ -225,22 +223,22 @@ function buildControls(p) {
 
 // --------------- shape builder ---------------
 
-function buildShape(p, seed, n, noiseStr, timeOffset) {
-  p.randomSeed(seed);
-  p.noiseSeed(seed);
+function buildShape(seed, n, noiseStr, timeOffset) {
+  randomSeed(seed);
+  noiseSeed(seed);
 
   const cx = W / 2;
   const cy = H / 2;
   const verts = [];
 
   for (let i = 0; i < n; i++) {
-    const angle = (p.TWO_PI / n) * i - p.HALF_PI;
+    const angle = (TWO_PI / n) * i - HALF_PI;
 
     // Noise sample: use angle as x-axis and time as y-axis
-    const nx = p.cos(angle) * 1.5 + 2;
-    const ny = p.sin(angle) * 1.5 + 2;
-    const nVal = p.noise(nx + timeOffset, ny + timeOffset); // 0..1
-    const distortion = p.map(nVal, 0, 1, 1 - noiseStr, 1 + noiseStr);
+    const nx = cos(angle) * 1.5 + 2;
+    const ny = sin(angle) * 1.5 + 2;
+    const nVal = noise(nx + timeOffset, ny + timeOffset); // 0..1
+    const distortion = map(nVal, 0, 1, 1 - noiseStr, 1 + noiseStr);
 
     const r = BASE_RADIUS * distortion;
     verts.push({
@@ -260,8 +258,9 @@ function computeBevel(outer, bevel) {
   // Trivial case: no bevel
   if (n < 3 || bevel <= 0) {
     var copy = outer.map(function (v) { return { x: v.x, y: v.y }; });
-    var map = []; for (var i = 0; i < n; i++) map.push(i);
-    return { inner: copy, outerMap: map };
+    var indexMap = [];
+    for (var ti = 0; ti < n; ti++) indexMap.push(ti);
+    return { inner: copy, outerMap: indexMap };
   }
 
   // Per-edge direction vectors and inward unit normals.
@@ -296,14 +295,14 @@ function computeBevel(outer, bevel) {
 
     var cross = d1x * d2y - d1y * d2x;
     if (Math.abs(cross) < 1e-10) {
-      // Nearly parallel — return midpoint of the two offset points
+      // Nearly parallel - return midpoint of the two offset points
       return { x: (p1x + p2x) / 2, y: (p1y + p2y) / 2 };
     }
     var t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / cross;
     return { x: p1x + t * d1x, y: p1y + t * d1y };
   }
 
-  // Centroid — used later for clamping
+  // Centroid - used later for clamping
   var pcx = 0, pcy = 0;
   for (var i = 0; i < n; i++) { pcx += outer[i].x; pcy += outer[i].y; }
   pcx /= n; pcy /= n;
@@ -313,7 +312,7 @@ function computeBevel(outer, bevel) {
   for (var i = 0; i < n; i++) active.push(i);
 
   // Iteratively remove ONE edge per pass (the most-collapsed),
-  // then recompute — safer than batch removal for interacting edges.
+  // then recompute - safer than batch removal for interacting edges.
   var changed = true;
   while (changed && active.length >= 3) {
     changed = false;
@@ -346,15 +345,15 @@ function computeBevel(outer, bevel) {
     }
   }
 
-  // Assign an inner vertex for every outer vertex.
-  // Each miter point at the junction of consecutive active edges covers
-  // all outer vertices between those two edges (collapsed ones included).
-  var inner = new Array(n);
+  // Ring of bevel vertices (not named "inner": avoids clashing with window in p5 global mode).
+  var bevelInner = new Array(n);
   var m = active.length;
 
   if (m < 2) {
-    // Everything collapsed — map to centroid
-    for (var i = 0; i < n; i++) inner[i] = { x: pcx, y: pcy };
+    // All active edges removed: place every inner corner at centroid.
+    for (var hi = 0; hi < n; hi++) {
+      bevelInner[hi] = { x: pcx, y: pcy };
+    }
   } else {
     for (var idx = 0; idx < m; idx++) {
       var e     = active[idx];
@@ -364,7 +363,7 @@ function computeBevel(outer, bevel) {
       // Walk from outer vertex (e+1)%n to nextE inclusive
       var v = (e + 1) % n;
       while (true) {
-        inner[v] = { x: miter.x, y: miter.y };
+        bevelInner[v] = { x: miter.x, y: miter.y };
         if (v === nextE) break;
         v = (v + 1) % n;
       }
@@ -373,14 +372,14 @@ function computeBevel(outer, bevel) {
 
   // Post-process: clamp any inner vertex that escapes outward.
   // An inner vertex must not be further from centroid than its outer vertex,
-  // and the displacement outer→inner must point inward (toward centroid).
+  // and the displacement outer->inner must point inward (toward centroid).
   for (var i = 0; i < n; i++) {
     var toCx = pcx - outer[i].x;
     var toCy = pcy - outer[i].y;
     var toCLen = Math.sqrt(toCx * toCx + toCy * toCy);
 
-    var dx = inner[i].x - outer[i].x;
-    var dy = inner[i].y - outer[i].y;
+    var dx = bevelInner[i].x - outer[i].x;
+    var dy = bevelInner[i].y - outer[i].y;
 
     // dot > 0 means inner vertex is on the centroid side
     var dot = dx * toCx + dy * toCy;
@@ -388,28 +387,28 @@ function computeBevel(outer, bevel) {
     // Also check: inner must not be further from centroid than outer
     var odr2 = (outer[i].x - pcx) * (outer[i].x - pcx) +
                (outer[i].y - pcy) * (outer[i].y - pcy);
-    var idr2 = (inner[i].x - pcx) * (inner[i].x - pcx) +
-               (inner[i].y - pcy) * (inner[i].y - pcy);
+    var idr2 = (bevelInner[i].x - pcx) * (bevelInner[i].x - pcx) +
+               (bevelInner[i].y - pcy) * (bevelInner[i].y - pcy);
 
     if (dot < 0 || idr2 > odr2) {
       // Fallback: move inward from outer vertex toward centroid by bevel
       if (toCLen > 1e-10) {
         var s = Math.min(bevel, toCLen) / toCLen;
-        inner[i] = { x: outer[i].x + toCx * s, y: outer[i].y + toCy * s };
+        bevelInner[i] = { x: outer[i].x + toCx * s, y: outer[i].y + toCy * s };
       } else {
-        inner[i] = { x: pcx, y: pcy };
+        bevelInner[i] = { x: pcx, y: pcy };
       }
     }
   }
 
-  var result = fixSelfIntersections(inner, outer);
+  var result = fixSelfIntersections(bevelInner, outer);
   postProcessBevel(result.inner, result.outerMap, outer);
   return result;
 }
 
 // --------------- self-intersection fix ---------------
 
-// Segment–segment intersection (open intervals, no endpoints).
+// Segment-segment intersection (open intervals, no endpoints).
 // Returns { point, tA, tB } or null.
 function segSegIntersect(a, b, c, d) {
   var EPS = 1e-9;
@@ -431,16 +430,16 @@ function segSegIntersect(a, b, c, d) {
 // Pipeline:
 // 1) Merge consecutive coincident inner vertices into "groups" so every
 //    edge in the compressed polygon has nonzero length.
-// 2) For each group, check the effective left edge (prev-group → this-group)
-//    and right edge (this-group → next-group) for crossings with any
+// 2) For each group, check the effective left edge (prev-group -> this-group)
+//    and right edge (this-group -> next-group) for crossings with any
 //    non-adjacent edge of the compressed polygon.
 // 3) Apply:
-//      • Both cross  → first half of the group's outer-indices snapped to
+//      * Both cross  -> first half of the group's outer-indices snapped to
 //        the left crossing point, second half to the right crossing point.
 //        For a single-vertex group this spawns an extra inner vertex
 //        (creating a new bevel face).
-//      • One crosses  → whole group snapped to that crossing point.
-//      • None crosses → keep original position.
+//      * One crosses  -> whole group snapped to that crossing point.
+//      * None crosses -> keep original position.
 // 4) Expand back: every original outer vertex gets exactly one inner vertex
 //    and an entry in outerMap for its connector.
 function fixSelfIntersections(inner, outer) {
@@ -473,10 +472,14 @@ function fixSelfIntersections(inner, outer) {
 
   var gn = groups.length;
   if (gn < 3) {
-    // Degenerate — nothing to fix
-    var res = [], map = [];
-    for (var i = 0; i < n; i++) { res.push({ x: inner[i].x, y: inner[i].y }); map.push(i); }
-    return { inner: res, outerMap: map };
+    // Degenerate - nothing to fix
+    var res = [];
+    var idxMap = [];
+    for (var i = 0; i < n; i++) {
+      res.push({ x: inner[i].x, y: inner[i].y });
+      idxMap.push(i);
+    }
+    return { inner: res, outerMap: idxMap };
   }
 
   // --- Step 2: detect crossings on the compressed polygon ---
@@ -485,7 +488,7 @@ function fixSelfIntersections(inner, outer) {
     var nextGI = (gi + 1) % gn;
     var A = groups[prevGI], B = groups[gi], C = groups[nextGI];
 
-    // Left edge: A → B  (vertex B at t = 1; want highest tA)
+    // Left edge: A -> B  (vertex B at t = 1; want highest tA)
     var leftHit = null;
     for (var gj = 0; gj < gn; gj++) {
       if (gj === (prevGI - 1 + gn) % gn || gj === prevGI || gj === gi) continue;
@@ -494,7 +497,7 @@ function fixSelfIntersections(inner, outer) {
       if (h && (!leftHit || h.tA > leftHit.tA)) leftHit = h;
     }
 
-    // Right edge: B → C  (vertex B at t = 0; want lowest tA)
+    // Right edge: B -> C  (vertex B at t = 0; want lowest tA)
     var rightHit = null;
     for (var gj = 0; gj < gn; gj++) {
       if (gj === prevGI || gj === gi || gj === nextGI) continue;
@@ -524,7 +527,7 @@ function fixSelfIntersections(inner, outer) {
         newInner.push({ x: rh.point.x, y: rh.point.y });
         outerMap.push(idx[0]);
       } else {
-        // Collapsed group: first half → left hit, second half → right hit
+        // Collapsed group: first half -> left hit, second half -> right hit
         var half = Math.ceil(idx.length / 2);
         for (var k = 0; k < half; k++) {
           newInner.push({ x: lh.point.x, y: lh.point.y });
@@ -559,11 +562,11 @@ function fixSelfIntersections(inner, outer) {
 // --------------- post-process: eliminate all remaining crossings ---------------
 //
 // Three phases per iteration (up to MAX_ITER passes):
-//   Phase 0 – inner-edge vs inner-edge: snap the two forward-endpoints of
+//   Phase 0 - inner-edge vs inner-edge: snap the two forward-endpoints of
 //             crossing edge pairs to their intersection (pinch).
-//   Phase 1 – connector vs inner-edge: find the first inner edge each
+//   Phase 1 - connector vs inner-edge: find the first inner edge each
 //             connector crosses and shorten the connector to just before it.
-//   Phase 2 – connector vs connector: shorten whichever connector's crossing
+//   Phase 2 - connector vs connector: shorten whichever connector's crossing
 //             point is nearer its inner endpoint.
 //
 // Every phase only *shortens* segments (moves inner vertices toward their
@@ -622,11 +625,11 @@ function postProcessBevel(inner, outerMap, outer) {
       }
     }
 
-    // ---- Phase 2: connector–connector crossings ----
+    // ---- Phase 2: connector-connector crossings ----
     for (var i = 0; i < m; i++) {
       for (var j = i + 1; j < m; j++) {
         var oiA = outerMap[i], oiB = outerMap[j];
-        if (oiA === oiB) continue; // same outer vertex — no crossing
+        if (oiA === oiB) continue; // same outer vertex - no crossing
         var h = segSegIntersect(outer[oiA], inner[i], outer[oiB], inner[j]);
         if (h) {
           // Shorten the connector whose crossing is nearer its inner end
