@@ -7,3 +7,7 @@ Beveled-edge polygon rendering: a **2D outline** is offset inward and the side q
 **Run in the browser (no clone):** live sketch on the p5.js Web Editor:
 
 https://editor.p5js.org/timpyrkov/sketches/sAm_EgiI3
+
+## Disclaimer
+
+Works well on simple polygons with no self-intersections (convex or slightly concave). May break on complex self-intersecting polygons.
