@@ -74,7 +74,7 @@ new p5(function (p) {
     const n = outer.length;
 
     // Compute inner polygon (bevel offset)
-    const { inner } = computeBevel(outer, bevelThickness);
+    const { inner, outerMap } = computeBevel(outer, bevelThickness);
 
     // Fill outer shape
     p.fill(30, 144, 255); // dodgerblue
@@ -95,18 +95,20 @@ new p5(function (p) {
     }
 
     // Inner edges (skip collapsed — both endpoints coincide)
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
+    const m = inner.length;
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
       const dx = inner[j].x - inner[i].x;
       const dy = inner[j].y - inner[i].y;
-      if (dx * dx + dy * dy > 1) {
+      if (dx * dx + dy * dy > 0.25) {
         p.line(inner[i].x, inner[i].y, inner[j].x, inner[j].y);
       }
     }
 
     // Connectors (outer vertex → inner vertex)
-    for (let i = 0; i < n; i++) {
-      p.line(outer[i].x, outer[i].y, inner[i].x, inner[i].y);
+    for (let i = 0; i < m; i++) {
+      const oi = outerMap[i];
+      p.line(outer[oi].x, outer[oi].y, inner[i].x, inner[i].y);
     }
   };
 });
@@ -147,7 +149,9 @@ function computeBevel(outer, bevel) {
 
   // Trivial case: no bevel
   if (n < 3 || bevel <= 0) {
-    return { inner: outer.map(function (v) { return { x: v.x, y: v.y }; }) };
+    var copy = outer.map(function (v) { return { x: v.x, y: v.y }; });
+    var map = []; for (var i = 0; i < n; i++) map.push(i);
+    return { inner: copy, outerMap: map };
   }
 
   // Per-edge direction vectors and inward unit normals.
@@ -288,5 +292,248 @@ function computeBevel(outer, bevel) {
     }
   }
 
-  return { inner: inner };
+  var result = fixSelfIntersections(inner, outer);
+  postProcessBevel(result.inner, result.outerMap, outer);
+  return result;
+}
+
+// --------------- self-intersection fix ---------------
+
+// Segment–segment intersection (open intervals, no endpoints).
+// Returns { point, tA, tB } or null.
+function segSegIntersect(a, b, c, d) {
+  var EPS = 1e-9;
+  var dx1 = b.x - a.x, dy1 = b.y - a.y;
+  var dx2 = d.x - c.x, dy2 = d.y - c.y;
+  var cross = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(cross) < EPS) return null;
+  var fx = c.x - a.x, fy = c.y - a.y;
+  var t = (fx * dy2 - fy * dx2) / cross;
+  var u = (fx * dy1 - fy * dx1) / cross;
+  if (t > EPS && t < 1 - EPS && u > EPS && u < 1 - EPS) {
+    return { point: { x: a.x + t * dx1, y: a.y + t * dy1 }, tA: t, tB: u };
+  }
+  return null;
+}
+
+// Fix self-intersections in the inner polygon.
+//
+// Pipeline:
+// 1) Merge consecutive coincident inner vertices into "groups" so every
+//    edge in the compressed polygon has nonzero length.
+// 2) For each group, check the effective left edge (prev-group → this-group)
+//    and right edge (this-group → next-group) for crossings with any
+//    non-adjacent edge of the compressed polygon.
+// 3) Apply:
+//      • Both cross  → first half of the group's outer-indices snapped to
+//        the left crossing point, second half to the right crossing point.
+//        For a single-vertex group this spawns an extra inner vertex
+//        (creating a new bevel face).
+//      • One crosses  → whole group snapped to that crossing point.
+//      • None crosses → keep original position.
+// 4) Expand back: every original outer vertex gets exactly one inner vertex
+//    and an entry in outerMap for its connector.
+function fixSelfIntersections(inner, outer) {
+  var n = inner.length;
+  var DIST_SQ = 0.25; // threshold for "same position"
+
+  // --- Step 1: build groups of consecutive coincident vertices ---
+  var groups = []; // { x, y, indices[] }
+  for (var i = 0; i < n; i++) {
+    if (groups.length > 0) {
+      var last = groups[groups.length - 1];
+      var dx = inner[i].x - last.x, dy = inner[i].y - last.y;
+      if (dx * dx + dy * dy < DIST_SQ) {
+        last.indices.push(i);
+        continue;
+      }
+    }
+    groups.push({ x: inner[i].x, y: inner[i].y, indices: [i] });
+  }
+  // Wrap-around: merge last into first if same position
+  if (groups.length > 1) {
+    var first = groups[0], last = groups[groups.length - 1];
+    var dx = first.x - last.x, dy = first.y - last.y;
+    if (dx * dx + dy * dy < DIST_SQ) {
+      first.indices = last.indices.concat(first.indices);
+      first.x = last.x; first.y = last.y;
+      groups.pop();
+    }
+  }
+
+  var gn = groups.length;
+  if (gn < 3) {
+    // Degenerate — nothing to fix
+    var res = [], map = [];
+    for (var i = 0; i < n; i++) { res.push({ x: inner[i].x, y: inner[i].y }); map.push(i); }
+    return { inner: res, outerMap: map };
+  }
+
+  // --- Step 2: detect crossings on the compressed polygon ---
+  for (var gi = 0; gi < gn; gi++) {
+    var prevGI = (gi - 1 + gn) % gn;
+    var nextGI = (gi + 1) % gn;
+    var A = groups[prevGI], B = groups[gi], C = groups[nextGI];
+
+    // Left edge: A → B  (vertex B at t = 1; want highest tA)
+    var leftHit = null;
+    for (var gj = 0; gj < gn; gj++) {
+      if (gj === (prevGI - 1 + gn) % gn || gj === prevGI || gj === gi) continue;
+      var gj2 = (gj + 1) % gn;
+      var h = segSegIntersect(A, B, groups[gj], groups[gj2]);
+      if (h && (!leftHit || h.tA > leftHit.tA)) leftHit = h;
+    }
+
+    // Right edge: B → C  (vertex B at t = 0; want lowest tA)
+    var rightHit = null;
+    for (var gj = 0; gj < gn; gj++) {
+      if (gj === prevGI || gj === gi || gj === nextGI) continue;
+      var gj2 = (gj + 1) % gn;
+      var h = segSegIntersect(B, C, groups[gj], groups[gj2]);
+      if (h && (!rightHit || h.tA < rightHit.tA)) rightHit = h;
+    }
+
+    groups[gi].leftHit = leftHit;
+    groups[gi].rightHit = rightHit;
+  }
+
+  // --- Step 3 + 4: expand back into newInner / outerMap ---
+  var newInner = [];
+  var outerMap = [];
+
+  for (var gi = 0; gi < gn; gi++) {
+    var g = groups[gi];
+    var lh = g.leftHit, rh = g.rightHit;
+    var idx = g.indices;
+
+    if (lh && rh) {
+      if (idx.length === 1) {
+        // Single vertex: spawn two (creates new bevel face)
+        newInner.push({ x: lh.point.x, y: lh.point.y });
+        outerMap.push(idx[0]);
+        newInner.push({ x: rh.point.x, y: rh.point.y });
+        outerMap.push(idx[0]);
+      } else {
+        // Collapsed group: first half → left hit, second half → right hit
+        var half = Math.ceil(idx.length / 2);
+        for (var k = 0; k < half; k++) {
+          newInner.push({ x: lh.point.x, y: lh.point.y });
+          outerMap.push(idx[k]);
+        }
+        for (var k = half; k < idx.length; k++) {
+          newInner.push({ x: rh.point.x, y: rh.point.y });
+          outerMap.push(idx[k]);
+        }
+      }
+    } else if (lh) {
+      for (var k = 0; k < idx.length; k++) {
+        newInner.push({ x: lh.point.x, y: lh.point.y });
+        outerMap.push(idx[k]);
+      }
+    } else if (rh) {
+      for (var k = 0; k < idx.length; k++) {
+        newInner.push({ x: rh.point.x, y: rh.point.y });
+        outerMap.push(idx[k]);
+      }
+    } else {
+      for (var k = 0; k < idx.length; k++) {
+        newInner.push({ x: g.x, y: g.y });
+        outerMap.push(idx[k]);
+      }
+    }
+  }
+
+  return { inner: newInner, outerMap: outerMap };
+}
+
+// --------------- post-process: eliminate all remaining crossings ---------------
+//
+// Three phases per iteration (up to MAX_ITER passes):
+//   Phase 0 – inner-edge vs inner-edge: snap the two forward-endpoints of
+//             crossing edge pairs to their intersection (pinch).
+//   Phase 1 – connector vs inner-edge: find the first inner edge each
+//             connector crosses and shorten the connector to just before it.
+//   Phase 2 – connector vs connector: shorten whichever connector's crossing
+//             point is nearer its inner endpoint.
+//
+// Every phase only *shortens* segments (moves inner vertices toward their
+// outer counterpart or toward a crossing point), so the process converges.
+
+function postProcessBevel(inner, outerMap, outer) {
+  var m = inner.length;
+  var MAX_ITER = 5;
+
+  for (var iter = 0; iter < MAX_ITER; iter++) {
+    var changed = false;
+
+    // ---- Phase 0: inner-edge self-intersections ----
+    for (var i = 0; i < m; i++) {
+      var i2 = (i + 1) % m;
+      var ex = inner[i2].x - inner[i].x, ey = inner[i2].y - inner[i].y;
+      if (ex * ex + ey * ey < 0.01) continue;
+      for (var j = i + 2; j < m; j++) {
+        if (i === 0 && j === m - 1) continue; // adjacent (wrap)
+        var j2 = (j + 1) % m;
+        var fx = inner[j2].x - inner[j].x, fy = inner[j2].y - inner[j].y;
+        if (fx * fx + fy * fy < 0.01) continue;
+        var h = segSegIntersect(inner[i], inner[i2], inner[j], inner[j2]);
+        if (h) {
+          // Pinch: snap the two "inner" endpoints to the crossing point
+          inner[i2] = { x: h.point.x, y: h.point.y };
+          inner[j]  = { x: h.point.x, y: h.point.y };
+          changed = true;
+        }
+      }
+    }
+
+    // ---- Phase 1: clip connectors against inner edges ----
+    for (var i = 0; i < m; i++) {
+      var oi = outerMap[i];
+      var ox = outer[oi].x, oy = outer[oi].y;
+      var ix = inner[i].x, iy = inner[i].y;
+      var cdx = ix - ox, cdy = iy - oy;
+      if (cdx * cdx + cdy * cdy < 0.01) continue;
+
+      var bestT = 1.0;
+      for (var j = 0; j < m; j++) {
+        var j2 = (j + 1) % m;
+        // skip edges adjacent to this inner vertex
+        if (j === i || j === (i - 1 + m) % m) continue;
+        var ex = inner[j2].x - inner[j].x, ey = inner[j2].y - inner[j].y;
+        if (ex * ex + ey * ey < 0.01) continue;
+        var h = segSegIntersect({x: ox, y: oy}, {x: ix, y: iy}, inner[j], inner[j2]);
+        if (h && h.tA < bestT) bestT = h.tA;
+      }
+
+      if (bestT < 0.999) {
+        var t = bestT * 0.95; // slightly back toward outer vertex
+        inner[i] = { x: ox + t * cdx, y: oy + t * cdy };
+        changed = true;
+      }
+    }
+
+    // ---- Phase 2: connector–connector crossings ----
+    for (var i = 0; i < m; i++) {
+      for (var j = i + 1; j < m; j++) {
+        var oiA = outerMap[i], oiB = outerMap[j];
+        if (oiA === oiB) continue; // same outer vertex — no crossing
+        var h = segSegIntersect(outer[oiA], inner[i], outer[oiB], inner[j]);
+        if (h) {
+          // Shorten the connector whose crossing is nearer its inner end
+          if (h.tA >= h.tB) {
+            var t = h.tA * 0.95;
+            var dx = inner[i].x - outer[oiA].x, dy = inner[i].y - outer[oiA].y;
+            inner[i] = { x: outer[oiA].x + t * dx, y: outer[oiA].y + t * dy };
+          } else {
+            var t = h.tB * 0.95;
+            var dx = inner[j].x - outer[oiB].x, dy = inner[j].y - outer[oiB].y;
+            inner[j] = { x: outer[oiB].x + t * dx, y: outer[oiB].y + t * dy };
+          }
+          changed = true;
+        }
+      }
+    }
+
+    if (!changed) break;
+  }
 }
