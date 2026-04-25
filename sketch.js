@@ -1,117 +1,235 @@
+// =====================================================================
+//  Pseudo-3D Bevel Polygon — self-contained p5.js sketch.
+//  Works in the local index.html (uses #canvas-container / #controls /
+//  HTML sliders if present) AND in the p5js online editor (auto-creates
+//  its own sliders).
+// =====================================================================
+
 let seed = 42;
-let numVertices = 12;
-let noiseStrength = 0.3;
+let numVertices = 30;
+let noiseStrength = 0.5;
 let animSpeed = 1.0;
 let playing = true;
 let animOffset = 0;
-let bevelThickness = 20;
+let bevelThickness = 30;
 let lightAngle = 45;
+let showWireframe = true;
 
 const W = 400;
 const H = 400;
 const BASE_RADIUS = Math.min(W, H) / 3;
 
-function getSlider(id) {
-  return document.getElementById(id);
-}
-
-function setVal(id, val) {
-  document.getElementById(id).textContent = val;
-}
+// Slider value-providers populated in setup(). Each exposes .value().
+let ctl = {};
 
 new p5(function (p) {
   p.setup = function () {
     const cnv = p.createCanvas(W, H);
-    cnv.parent('canvas-container');
+    const cContainer = document.getElementById('canvas-container');
+    if (cContainer) cnv.parent(cContainer);
     p.colorMode(p.RGB, 255, 255, 255, 255);
 
-    // Wire up sliders
-    getSlider('slider-seed').addEventListener('input', function () {
-      seed = parseInt(this.value);
-      setVal('val-seed', seed);
-    });
-
-    getSlider('slider-vertices').addEventListener('input', function () {
-      numVertices = parseInt(this.value);
-      setVal('val-vertices', numVertices);
-    });
-
-    getSlider('slider-noise').addEventListener('input', function () {
-      noiseStrength = parseFloat(this.value);
-      setVal('val-noise', noiseStrength.toFixed(2));
-    });
-
-    getSlider('slider-bevel').addEventListener('input', function () {
-      bevelThickness = parseFloat(this.value);
-      setVal('val-bevel', bevelThickness.toFixed(0));
-    });
-
-    getSlider('slider-light').addEventListener('input', function () {
-      lightAngle = parseFloat(this.value);
-      setVal('val-light', lightAngle.toFixed(0));
-    });
-
-    getSlider('slider-speed').addEventListener('input', function () {
-      animSpeed = Math.pow(10, parseFloat(this.value) * 2 - 1);
-      setVal('val-speed', animSpeed.toFixed(2));
-    });
-
-    document.getElementById('btn-playpause').addEventListener('click', function () {
-      playing = !playing;
-      this.textContent = playing ? '⏸ Pause' : '▶ Play';
-    });
+    buildControls(p);
   };
 
   p.draw = function () {
-    if (playing) {
-      animOffset += 0.005 * animSpeed;
-    }
+    // Pull current control values
+    seed           = ctl.seed.value();
+    numVertices    = ctl.vertices.value();
+    noiseStrength  = ctl.noise.value();
+    bevelThickness = ctl.bevel.value();
+    lightAngle     = ctl.light.value();
+    animSpeed      = Math.pow(10, ctl.speed.value() * 2 - 1);
 
-    p.background(20, 20, 28);
+    if (playing) animOffset += 0.005 * animSpeed;
 
-    // Build outer polygon
+    p.background(18, 18, 22);
+
+    // --- Geometry ---
     const outer = buildShape(p, seed, numVertices, noiseStrength, animOffset);
     const n = outer.length;
-
-    // Compute inner polygon (bevel offset)
     const { inner, outerMap } = computeBevel(outer, bevelThickness);
+    const m = inner.length;
 
-    // Fill outer shape
-    p.fill(30, 144, 255); // dodgerblue
+    // Polygon centroid (for face-normal estimation)
+    let cx = 0, cy = 0;
+    for (const v of outer) { cx += v.x; cy += v.y; }
+    cx /= n; cy /= n;
+
+    // Light direction unit vector
+    const la = lightAngle * Math.PI / 180;
+    const lx = Math.cos(la), ly = Math.sin(la);
+
+    // --- Bevel side faces (shaded by outward direction · light) ---
     p.noStroke();
+    for (let k = 0; k < m; k++) {
+      const k2 = (k + 1) % m;
+      const oA = outer[outerMap[k]];
+      const oB = outer[outerMap[k2]];
+      const iA = inner[k];
+      const iB = inner[k2];
+
+      // Face centroid
+      const fcx = (oA.x + oB.x + iA.x + iB.x) * 0.25;
+      const fcy = (oA.y + oB.y + iA.y + iB.y) * 0.25;
+      // Outward (face-normal) direction in 2D = (face-centroid − polygon-centroid)
+      let nx = fcx - cx, ny = fcy - cy;
+      const L = Math.sqrt(nx * nx + ny * ny);
+      if (L > 1e-6) { nx /= L; ny /= L; }
+
+      // Lambert-style brightness in [0,1]
+      const brightness = 0.5 + 0.5 * (nx * lx + ny * ly);
+      const g = 60 + 170 * brightness; // gray ramp [60, 230]
+      p.fill(g, g, g);
+      p.stroke(g, g, g);   // overdraw gaps between adjacent quads
+      p.strokeWeight(1.2);
+
+      p.beginShape();
+      p.vertex(oA.x, oA.y);
+      p.vertex(oB.x, oB.y);
+      p.vertex(iB.x, iB.y);
+      p.vertex(iA.x, iA.y);
+      p.endShape(p.CLOSE);
+    }
+
+    p.noStroke(); // clear stroke before top surface
+    // --- Top (flat) surface — medium uniform gray ---
+    p.fill(145);
     p.beginShape();
-    for (const v of outer) p.vertex(v.x, v.y);
+    for (const v of inner) p.vertex(v.x, v.y);
     p.endShape(p.CLOSE);
 
-    // Wireframe overlay
-    p.stroke(255);
-    p.strokeWeight(1);
-    p.noFill();
+    // --- Wireframe overlay (subtle) ---
+    if (showWireframe) {
+      p.stroke(255, 255, 255, 90);
+      p.strokeWeight(1);
+      p.noFill();
 
-    // Outer edges
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      p.line(outer[i].x, outer[i].y, outer[j].x, outer[j].y);
-    }
-
-    // Inner edges (skip collapsed — both endpoints coincide)
-    const m = inner.length;
-    for (let i = 0; i < m; i++) {
-      const j = (i + 1) % m;
-      const dx = inner[j].x - inner[i].x;
-      const dy = inner[j].y - inner[i].y;
-      if (dx * dx + dy * dy > 0.25) {
-        p.line(inner[i].x, inner[i].y, inner[j].x, inner[j].y);
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        p.line(outer[i].x, outer[i].y, outer[j].x, outer[j].y);
       }
-    }
-
-    // Connectors (outer vertex → inner vertex)
-    for (let i = 0; i < m; i++) {
-      const oi = outerMap[i];
-      p.line(outer[oi].x, outer[oi].y, inner[i].x, inner[i].y);
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m;
+        const dx = inner[j].x - inner[i].x;
+        const dy = inner[j].y - inner[i].y;
+        if (dx * dx + dy * dy > 0.25) {
+          p.line(inner[i].x, inner[i].y, inner[j].x, inner[j].y);
+        }
+      }
+      for (let i = 0; i < m; i++) {
+        const oi = outerMap[i];
+        p.line(outer[oi].x, outer[oi].y, inner[i].x, inner[i].y);
+      }
     }
   };
 });
+
+// --------------- UI builder ---------------
+
+// If the host page already has the styled HTML sliders, wrap them.
+// Otherwise create p5 createSlider() controls so the script also
+// runs as-is in the p5js online editor.
+function buildControls(p) {
+  const hasHTML = !!document.getElementById('slider-seed');
+
+  function wrapDOM(sliderId, valId, fmt) {
+    const el = document.getElementById(sliderId);
+    const valEl = document.getElementById(valId);
+    const update = () => { if (valEl) valEl.textContent = fmt(parseFloat(el.value)); };
+    el.addEventListener('input', update);
+    update();
+    return { value: () => parseFloat(el.value) };
+  }
+
+  function p5Slider(label, min, max, val, step, fmt) {
+    const host = document.getElementById('controls');
+    const row = p.createDiv('');
+    if (host) row.parent(host); else row.style('margin', '4px');
+    row.style('display', 'flex');
+    row.style('align-items', 'center');
+    row.style('gap', '8px');
+    row.style('color', '#cfd6dc');
+    row.style('font-family', 'sans-serif');
+    row.style('font-size', '13px');
+
+    const lab = p.createSpan(label);
+    lab.parent(row);
+    lab.style('min-width', '64px');
+
+    const valSpan = p.createSpan('');
+    valSpan.parent(row);
+    valSpan.style('min-width', '40px');
+    valSpan.style('color', '#fff');
+
+    const s = p.createSlider(min, max, val, step);
+    s.parent(row);
+    s.style('flex', '1');
+
+    const update = () => valSpan.html(fmt(s.value()));
+    s.input(update); update();
+    return { value: () => s.value() };
+  }
+
+  if (hasHTML) {
+    ctl.seed       = wrapDOM('slider-seed',     'val-seed',     v => v.toFixed(0));
+    ctl.vertices   = wrapDOM('slider-vertices', 'val-vertices', v => v.toFixed(0));
+    ctl.noise      = wrapDOM('slider-noise',    'val-noise',    v => v.toFixed(2));
+    ctl.bevel      = wrapDOM('slider-bevel',    'val-bevel',    v => v.toFixed(0));
+    ctl.light      = wrapDOM('slider-light',    'val-light',    v => v.toFixed(0));
+    ctl.speed      = wrapDOM('slider-speed',    'val-speed',    v => Math.pow(10, v * 2 - 1).toFixed(2));
+    const chkWire  = document.getElementById('chk-wireframe');
+    if (chkWire) {
+      showWireframe = chkWire.checked;
+      chkWire.addEventListener('change', () => { showWireframe = chkWire.checked; });
+    }
+    const btn = document.getElementById('btn-playpause');
+    if (btn) btn.addEventListener('click', () => {
+      playing = !playing;
+      btn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    });
+  } else {
+    ctl.seed     = p5Slider('Seed',     0,   100, 42,  1,    v => v.toFixed(0));
+    ctl.vertices = p5Slider('Vertices', 3,   100, 30,  1,    v => v.toFixed(0));
+    ctl.noise    = p5Slider('Noise',    0,   1,   0.5, 0.01, v => v.toFixed(2));
+    ctl.bevel    = p5Slider('Bevel',    0,   BASE_RADIUS, 30, 1, v => v.toFixed(0));
+    ctl.light    = p5Slider('Light',    0,   360, 45,  1,    v => v.toFixed(0));
+    ctl.speed    = p5Slider('Speed',    0,   1,   0.5, 0.01, v => Math.pow(10, v * 2 - 1).toFixed(2));
+    // wireframe checkbox in p5 fallback
+    const host = document.getElementById('controls');
+    const wireRow = p.createDiv('');
+    if (host) wireRow.parent(host); else wireRow.style('margin', '4px');
+    wireRow.style('display', 'flex');
+    wireRow.style('align-items', 'center');
+    wireRow.style('gap', '8px');
+    wireRow.style('color', '#cfd6dc');
+    wireRow.style('font-family', 'sans-serif');
+    wireRow.style('font-size', '13px');
+    const wireLabel = p.createSpan('Wireframe');
+    wireLabel.parent(wireRow);
+    wireLabel.style('min-width', '64px');
+    const wireChk = p.createCheckbox('', true);
+    wireChk.parent(wireRow);
+    wireChk.changed(() => { showWireframe = wireChk.checked(); });
+    const btn = p.createButton('⏸ Pause');
+    if (host) btn.parent(host); else btn.style('margin', '8px');
+    btn.mousePressed(() => {
+      playing = !playing;
+      btn.html(playing ? '⏸ Pause' : '▶ Play');
+    });
+  }
+
+  // Global spacebar handler (always active regardless of focus)
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      playing = !playing;
+      // Update any visible play/pause button text
+      const btn = document.getElementById('btn-playpause');
+      if (btn) btn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    }
+  });
+}
 
 // --------------- shape builder ---------------
 
