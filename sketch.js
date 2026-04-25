@@ -5,14 +5,9 @@
 //  its own sliders).
 // =====================================================================
 
-let seed = 42;
-let numVertices = 30;
-let noiseStrength = 0.5;
-let animSpeed = 1.0;
+// Module-scope state that must persist across frames / handlers.
 let playing = true;
 let animOffset = 0;
-let bevelThickness = 30;
-let lightAngle = 45;
 let showWireframe = true;
 
 const W = 400;
@@ -21,25 +16,26 @@ const BASE_RADIUS = Math.min(W, H) / 3;
 
 // Slider value-providers populated in setup(). Each exposes .value().
 let ctl = {};
+// Reference to a "set play-button label" callback (HTML or p5 mode).
+let setPlayBtnLabel = () => {};
 
 new p5(function (p) {
   p.setup = function () {
     const cnv = p.createCanvas(W, H);
     const cContainer = document.getElementById('canvas-container');
     if (cContainer) cnv.parent(cContainer);
-    p.colorMode(p.RGB, 255, 255, 255, 255);
 
     buildControls(p);
   };
 
   p.draw = function () {
-    // Pull current control values
-    seed           = ctl.seed.value();
-    numVertices    = ctl.vertices.value();
-    noiseStrength  = ctl.noise.value();
-    bevelThickness = ctl.bevel.value();
-    lightAngle     = ctl.light.value();
-    animSpeed      = Math.pow(10, ctl.speed.value() * 2 - 1);
+    // Pull current control values (all are per-frame locals)
+    const seed           = ctl.seed.value();
+    const numVertices    = ctl.vertices.value();
+    const noiseStrength  = ctl.noise.value();
+    const bevelThickness = ctl.bevel.value();
+    const lightAngle     = ctl.light.value();
+    const animSpeed      = Math.pow(10, ctl.speed.value() * 2 - 1);
 
     if (playing) animOffset += 0.005 * animSpeed;
 
@@ -184,10 +180,10 @@ function buildControls(p) {
       chkWire.addEventListener('change', () => { showWireframe = chkWire.checked; });
     }
     const btn = document.getElementById('btn-playpause');
-    if (btn) btn.addEventListener('click', () => {
-      playing = !playing;
-      btn.textContent = playing ? '⏸ Pause' : '▶ Play';
-    });
+    if (btn) {
+      setPlayBtnLabel = () => { btn.textContent = playing ? '⏸ Pause' : '▶ Play'; };
+      btn.addEventListener('click', () => { playing = !playing; setPlayBtnLabel(); });
+    }
   } else {
     ctl.seed     = p5Slider('Seed',     0,   100, 42,  1,    v => v.toFixed(0));
     ctl.vertices = p5Slider('Vertices', 3,   100, 30,  1,    v => v.toFixed(0));
@@ -213,10 +209,8 @@ function buildControls(p) {
     wireChk.changed(() => { showWireframe = wireChk.checked(); });
     const btn = p.createButton('⏸ Pause');
     if (host) btn.parent(host); else btn.style('margin', '8px');
-    btn.mousePressed(() => {
-      playing = !playing;
-      btn.html(playing ? '⏸ Pause' : '▶ Play');
-    });
+    setPlayBtnLabel = () => { btn.html(playing ? '⏸ Pause' : '▶ Play'); };
+    btn.mousePressed(() => { playing = !playing; setPlayBtnLabel(); });
   }
 
   // Global spacebar handler (always active regardless of focus)
@@ -224,9 +218,7 @@ function buildControls(p) {
     if (e.code === 'Space') {
       e.preventDefault();
       playing = !playing;
-      // Update any visible play/pause button text
-      const btn = document.getElementById('btn-playpause');
-      if (btn) btn.textContent = playing ? '⏸ Pause' : '▶ Play';
+      setPlayBtnLabel();
     }
   });
 }
