@@ -1,4 +1,4 @@
-# pseudo3d
+# P5JS Pseudo3d
 
 Beveled-edge polygon rendering: a **2D outline** is offset inward and the side quads are shaded so it reads as extruded / pseudo-3D. Geometry is plain p5.js (`beginShape` / `vertex`); no WebGL.
 
